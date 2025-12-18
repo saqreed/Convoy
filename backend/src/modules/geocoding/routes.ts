@@ -1,0 +1,1 @@
+export { registerGeocodingRoutes } from './controller';

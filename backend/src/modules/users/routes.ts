@@ -1,0 +1,1 @@
+export { registerUserRoutes } from './controller';

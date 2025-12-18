@@ -1,0 +1,69 @@
+// Prisma schema according to spec
+// Note: In a real project, this would be prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String         @id @default(uuid())
+  phone     String?        @unique
+  email     String?        @unique
+  name      String
+  avatarUrl String?
+  createdAt DateTime       @default(now())
+  members   ConvoyMember[]
+}
+
+model Convoy {
+  id        String         @id @default(uuid())
+  title     String
+  leaderId  String
+  leader    User           @relation(fields: [leaderId], references: [id])
+  startTime DateTime?
+  status    String         @default("planned")
+  route     Json
+  createdAt DateTime       @default(now())
+  members   ConvoyMember[]
+  invites   Invite[]
+}
+
+model ConvoyMember {
+  convoyId String
+  userId   String
+  role     String    @default("member")
+  lastPing Json?
+  joinedAt DateTime  @default(now())
+
+  convoy   Convoy    @relation(fields: [convoyId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+
+  @@id([convoyId, userId])
+}
+
+model Invite {
+  id        String   @id @default(uuid())
+  convoyId  String
+  code      String
+  expiresAt DateTime
+
+  convoy    Convoy   @relation(fields: [convoyId], references: [id])
+}
+
+model LocationPing {
+  id       String   @id @default(uuid())
+  userId   String
+  convoyId String
+  lat      Float
+  lon      Float
+  speed    Float?
+  heading  Float?
+  accuracy Float?
+  battery  Int?
+  ts       DateTime @default(now())
+}

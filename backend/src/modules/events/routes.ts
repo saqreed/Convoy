@@ -1,0 +1,1 @@
+export { registerEventRoutes } from './controller';

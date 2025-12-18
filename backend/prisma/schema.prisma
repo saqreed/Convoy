@@ -1,0 +1,158 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String         @id @default(uuid())
+  phone     String?        @unique
+  email     String?        @unique
+  name      String
+  avatarUrl String?
+  createdAt DateTime       @default(now())
+  members   ConvoyMember[]
+  convoysLed Convoy[]      @relation("ConvoyLeader")
+  chatMessages ChatMessage[]
+  pollsCreated Poll[]
+  pollVotes PollVote[]
+  eventsCreated ConvoyEvent[]
+}
+
+model Convoy {
+  id        String         @id @default(uuid())
+  title     String
+  leaderId  String
+  leader    User           @relation("ConvoyLeader", fields: [leaderId], references: [id])
+  startTime DateTime?
+  status    String         @default("planned")
+  privacy   String         @default("invite")
+  route     Json
+  createdAt DateTime       @default(now())
+  members   ConvoyMember[]
+  invites   Invite[]
+  chatMessages ChatMessage[]
+  polls     Poll[]
+  events    ConvoyEvent[]
+}
+
+model Poll {
+  id          String       @id @default(uuid())
+  convoyId    String
+  createdById String
+  question    String
+  status      String       @default("open")
+  createdAt   DateTime     @default(now())
+
+  convoy      Convoy       @relation(fields: [convoyId], references: [id])
+  createdBy   User         @relation(fields: [createdById], references: [id])
+  options     PollOption[]
+  votes       PollVote[]
+
+  @@index([convoyId, createdAt])
+}
+
+model PollOption {
+  id      String    @id @default(uuid())
+  pollId  String
+  text    String
+
+  poll    Poll      @relation(fields: [pollId], references: [id])
+  votes   PollVote[]
+
+  @@index([pollId])
+}
+
+model PollVote {
+  pollId    String
+  userId    String
+  optionId  String
+  createdAt DateTime  @default(now())
+
+  poll      Poll      @relation(fields: [pollId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+  option    PollOption @relation(fields: [optionId], references: [id])
+
+  @@id([pollId, userId])
+  @@index([optionId])
+}
+
+model ConvoyEvent {
+  id          String   @id @default(uuid())
+  convoyId    String
+  createdById String?
+  type        String
+  title       String
+  payload     Json?
+  createdAt   DateTime @default(now())
+
+  convoy      Convoy   @relation(fields: [convoyId], references: [id])
+  createdBy   User?    @relation(fields: [createdById], references: [id])
+
+  @@index([convoyId, createdAt])
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  convoyId  String
+  userId    String
+  text      String
+  createdAt DateTime @default(now())
+
+  convoy    Convoy   @relation(fields: [convoyId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([convoyId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model ConvoyMember {
+  convoyId String
+  userId   String
+  role     String    @default("member")
+  lastPing Json?
+  joinedAt DateTime  @default(now())
+
+  convoy   Convoy    @relation(fields: [convoyId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+
+  @@id([convoyId, userId])
+}
+
+model Invite {
+  id        String   @id @default(uuid())
+  convoyId  String
+  code      String
+  expiresAt DateTime
+
+  convoy    Convoy   @relation(fields: [convoyId], references: [id])
+  @@index([code])
+}
+
+model LocationPing {
+  id       String   @id @default(uuid())
+  userId   String
+  convoyId String
+  lat      Float
+  lon      Float
+  speed    Float?
+  heading  Float?
+  accuracy Float?
+  battery  Int?
+  ts       DateTime @default(now())
+  @@index([convoyId, userId, ts])
+}
+
+model OtpSession {
+  id        String   @id @default(uuid())
+  phone     String
+  codeHash  String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+
+  @@index([phone])
+}

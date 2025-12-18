@@ -1,0 +1,1 @@
+export { registerRoutingRoutes } from './controller';
