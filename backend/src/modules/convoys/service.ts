@@ -13,10 +13,21 @@ export class ConvoyService {
     return { ...convoy, inviteCode: code };
   }
 
-  async joinConvoyByCode(convoyId: string, userId: string, code: string) {
-    const invite = await prisma.invite.findFirst({ where: { convoyId, code } });
-    if (!invite) throw new Error('Invalid code');
-    if (invite.expiresAt.getTime() < Date.now()) throw new Error('Expired code');
+  async joinConvoy(convoyId: string, userId: string, code?: string) {
+    const convoy = await prisma.convoy.findUnique({
+      where: { id: convoyId },
+      select: { id: true, privacy: true }
+    });
+    if (!convoy) throw new Error('Convoy not found');
+
+    if (convoy.privacy !== 'open') {
+      if (!code) throw new Error('Invite code is required for private convoys');
+
+      const invite = await prisma.invite.findFirst({ where: { convoyId, code } });
+      if (!invite) throw new Error('Invalid code');
+      if (invite.expiresAt.getTime() < Date.now()) throw new Error('Expired code');
+    }
+
     await prisma.convoyMember.upsert({
       where: { convoyId_userId: { convoyId, userId } },
       update: {},

@@ -1,13 +1,60 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { addMemberByPhoneSchema, createConvoySchema, joinConvoySchema, transferLeaderSchema, updateConvoySchema } from './schema';
+import {
+  addMemberByPhoneSchema,
+  createConvoySchema,
+  joinConvoySchema,
+  nearbyOpenConvoysQuerySchema,
+  transferLeaderSchema,
+  updateConvoySchema
+} from './schema';
 import { ConvoyService } from './service';
 import { prisma } from '../../db/client';
 
 const service = new ConvoyService();
 
+type RoutePoint = {
+  lat: number;
+  lon: number;
+  name?: string;
+};
+
 function authGuard(req: FastifyRequest) {
   // @ts-ignore
   return (req as any).user?.userId as string | undefined;
+}
+
+function isRoutePoint(value: unknown): value is RoutePoint {
+  if (!value || typeof value !== 'object') return false;
+  const point = value as Record<string, unknown>;
+  return typeof point.lat === 'number' && typeof point.lon === 'number';
+}
+
+function readRoutePoints(route: unknown): RoutePoint[] {
+  if (!Array.isArray(route)) return [];
+  return route.filter(isRoutePoint);
+}
+
+function readLastPingPoint(lastPing: unknown): RoutePoint | null {
+  if (!lastPing || typeof lastPing !== 'object') return null;
+  const point = lastPing as Record<string, unknown>;
+  if (typeof point.lat !== 'number' || typeof point.lon !== 'number') return null;
+  return { lat: point.lat, lon: point.lon };
+}
+
+function toRadians(value: number) {
+  return (value * Math.PI) / 180;
+}
+
+function distanceKm(a: RoutePoint, b: RoutePoint) {
+  const earthRadiusKm = 6371;
+  const dLat = toRadians(b.lat - a.lat);
+  const dLon = toRadians(b.lon - a.lon);
+  const lat1 = toRadians(a.lat);
+  const lat2 = toRadians(b.lat);
+  const haversine =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return 2 * earthRadiusKm * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
 export async function registerConvoyRoutes(app: FastifyInstance<any, any, any, any, any>) {
@@ -48,7 +95,7 @@ export async function registerConvoyRoutes(app: FastifyInstance<any, any, any, a
     const body = joinConvoySchema.parse(req.body);
     const convoyId = (req.params as any).id as string;
     try {
-      const res = await service.joinConvoyByCode(convoyId, userId, body.code);
+      const res = await service.joinConvoy(convoyId, userId, body.code);
       return { success: true, data: res };
     } catch (e: any) {
       return app.httpErrors.badRequest(e?.message || 'join failed');
@@ -63,6 +110,81 @@ export async function registerConvoyRoutes(app: FastifyInstance<any, any, any, a
     if (!userId) return app.httpErrors.unauthorized();
     const list = await prisma.convoy.findMany({ where: { members: { some: { userId } } }, orderBy: { createdAt: 'desc' } });
     return { success: true, data: list };
+  });
+
+  app.get('/convoys/open/nearby', {
+    schema: {
+      querystring: { $ref: 'NearbyOpenConvoysQuery#' },
+      response: { 200: { $ref: 'SuccessEnvelopeNearbyOpenConvoyList#' } }
+    },
+    config: { rateLimit: { max: 30, timeWindow: '1 minute' } }
+  }, async (req: FastifyRequest) => {
+    const userId = authGuard(req);
+    if (!userId) return app.httpErrors.unauthorized();
+
+    const query = nearbyOpenConvoysQuerySchema.parse(req.query);
+    const origin: RoutePoint = { lat: query.lat, lon: query.lon };
+
+    // TODO: move nearby discovery to PostGIS or another geo index once the
+    // open convoy catalog grows beyond a safe in-memory scan.
+    const convoys = await prisma.convoy.findMany({
+      where: {
+        privacy: 'open',
+        status: { notIn: ['completed', 'cancelled', 'archived'] },
+        members: { none: { userId } }
+      },
+      include: {
+        members: {
+          select: {
+            userId: true,
+            lastPing: true
+          }
+        }
+      }
+    });
+
+    const nearby = convoys
+      .map((convoy) => {
+        const route = readRoutePoints(convoy.route);
+        const leaderMember = convoy.members.find((member) => member.userId === convoy.leaderId);
+        const leaderLastPing = readLastPingPoint(leaderMember?.lastPing);
+        const anchors = leaderLastPing ? [leaderLastPing, ...route] : route;
+
+        let closestPoint: RoutePoint | null = null;
+        let closestDistanceKm = Number.POSITIVE_INFINITY;
+
+        for (const point of anchors) {
+          const candidateDistanceKm = distanceKm(origin, point);
+          if (candidateDistanceKm < closestDistanceKm) {
+            closestDistanceKm = candidateDistanceKm;
+            closestPoint = point;
+          }
+        }
+
+        if (!closestPoint || closestDistanceKm > query.radiusKm) return null;
+
+        return {
+          id: convoy.id,
+          title: convoy.title,
+          leaderId: convoy.leaderId,
+          status: convoy.status,
+          privacy: 'open' as const,
+          startTime: convoy.startTime,
+          createdAt: convoy.createdAt,
+          memberCount: convoy.members.length,
+          routePointCount: route.length,
+          startPoint: route[0] ?? null,
+          endPoint: route.length > 0 ? route[route.length - 1] : null,
+          closestPoint,
+          proximitySource: leaderLastPing && closestPoint === leaderLastPing ? 'leader-last-ping' : 'route-point',
+          distanceKm: Math.round(closestDistanceKm * 10) / 10
+        };
+      })
+      .filter((convoy): convoy is NonNullable<typeof convoy> => convoy !== null)
+      .sort((left, right) => left.distanceKm - right.distanceKm)
+      .slice(0, query.limit);
+
+    return { success: true, data: nearby };
   });
 
   app.get('/convoys/:id', {

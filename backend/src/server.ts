@@ -281,7 +281,6 @@ async function buildServer() {
   addSharedSchema({
     $id: 'ConvoyJoinBody',
     type: 'object',
-    required: ['code'],
     properties: { code: { type: 'string', minLength: 3 } },
     additionalProperties: false
   });
@@ -296,6 +295,61 @@ async function buildServer() {
       status: { type: 'string' }
     },
     additionalProperties: false
+  });
+  addSharedSchema({
+    $id: 'NearbyOpenConvoysQuery',
+    type: 'object',
+    required: ['lat', 'lon'],
+    properties: {
+      lat: { type: 'number', minimum: -90, maximum: 90 },
+      lon: { type: 'number', minimum: -180, maximum: 180 },
+      radiusKm: { type: 'number', minimum: 1, maximum: 500, default: 25 },
+      limit: { type: 'integer', minimum: 1, maximum: 20, default: 6 }
+    },
+    additionalProperties: false
+  });
+  addSharedSchema({
+    $id: 'NearbyOpenConvoy',
+    type: 'object',
+    required: [
+      'id',
+      'title',
+      'leaderId',
+      'status',
+      'privacy',
+      'createdAt',
+      'memberCount',
+      'routePointCount',
+      'distanceKm',
+      'closestPoint',
+      'proximitySource'
+    ],
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      title: { type: 'string' },
+      leaderId: { type: 'string', format: 'uuid' },
+      status: { type: 'string' },
+      privacy: { type: 'string', enum: ['open'] },
+      startTime: { type: ['string', 'null'], format: 'date-time' },
+      createdAt: { type: 'string', format: 'date-time' },
+      memberCount: { type: 'integer', minimum: 0 },
+      routePointCount: { type: 'integer', minimum: 0 },
+      distanceKm: { type: 'number', minimum: 0 },
+      startPoint: { anyOf: [{ $ref: 'LocationPoint#' }, { type: 'null' }] },
+      endPoint: { anyOf: [{ $ref: 'LocationPoint#' }, { type: 'null' }] },
+      closestPoint: { $ref: 'LocationPoint#' },
+      proximitySource: { type: 'string', enum: ['leader-last-ping', 'route-point'] }
+    },
+    additionalProperties: false
+  });
+  addSharedSchema({
+    $id: 'SuccessEnvelopeNearbyOpenConvoyList',
+    type: 'object',
+    required: ['success', 'data'],
+    properties: {
+      success: { type: 'boolean', const: true },
+      data: { type: 'array', items: { $ref: 'NearbyOpenConvoy#' } }
+    }
   });
 
   // Pings history

@@ -277,6 +277,9 @@ export default function CreateConvoyPage() {
                 <option value="invite">Invite</option>
                 <option value="open">Open</option>
               </select>
+              <p className="mt-1 text-xs text-slate-500">
+                Open convoys can appear in nearby discovery and allow joining without an invite code.
+              </p>
             </div>
             <div>
               <label className="label">Start Time</label>

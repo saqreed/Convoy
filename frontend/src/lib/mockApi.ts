@@ -1,4 +1,17 @@
-import type { ChatMessage, Convoy, ConvoyDetail, ConvoyEvent, ConvoyWithInvite, GeocodeSearchResult, LocationPoint, Poll, RoutedRoute, Track, User } from '../types';
+import type {
+  ChatMessage,
+  Convoy,
+  ConvoyDetail,
+  ConvoyEvent,
+  ConvoyWithInvite,
+  GeocodeSearchResult,
+  LocationPoint,
+  NearbyOpenConvoy,
+  Poll,
+  RoutedRoute,
+  Track,
+  User
+} from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 const TOKEN_STORAGE_KEY = 'token';
@@ -84,15 +97,30 @@ export async function createConvoy(input: { title: string; startTime?: string; r
   });
 }
 
-export async function joinConvoy(convoyId: string, code: string) {
+export async function joinConvoy(convoyId: string, code?: string) {
   return request<{ ok: boolean }>(`/convoys/${convoyId}/join`, {
     method: 'POST',
-    body: { code }
+    body: code?.trim() ? { code: code.trim() } : {}
   });
 }
 
 export async function getConvoy(convoyId: string) {
   return request<ConvoyDetail>(`/convoys/${convoyId}`);
+}
+
+export async function listNearbyOpenConvoys(query: {
+  lat: number;
+  lon: number;
+  radiusKm?: number;
+  limit?: number;
+}) {
+  const qs = new URLSearchParams({
+    lat: String(query.lat),
+    lon: String(query.lon)
+  });
+  if (typeof query.radiusKm === 'number') qs.set('radiusKm', String(query.radiusKm));
+  if (typeof query.limit === 'number') qs.set('limit', String(query.limit));
+  return request<NearbyOpenConvoy[]>(`/convoys/open/nearby?${qs.toString()}`);
 }
 
 export async function updateConvoy(

@@ -54,6 +54,23 @@ export interface ConvoyDetail extends Convoy {
   members?: ConvoyMember[];
 }
 
+export interface NearbyOpenConvoy {
+  id: UUID;
+  title: string;
+  leaderId: UUID;
+  status: string;
+  privacy: 'open';
+  startTime: string | null;
+  createdAt: string;
+  memberCount: number;
+  routePointCount: number;
+  distanceKm: number;
+  startPoint: LocationPoint | null;
+  endPoint: LocationPoint | null;
+  closestPoint: LocationPoint;
+  proximitySource: 'leader-last-ping' | 'route-point';
+}
+
 export interface PollOption {
   id: UUID;
   text: string;

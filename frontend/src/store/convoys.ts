@@ -10,7 +10,7 @@ type ConvoyState = {
   loadAll: () => Promise<void>;
   loadOne: (id: string) => Promise<void>;
   createOne: (payload: { title: string; startTime?: string; route: LocationPoint[]; privacy: 'invite' | 'open' }) => Promise<ConvoyWithInvite>;
-  joinOne: (id: string, code: string) => Promise<void>;
+  joinOne: (id: string, code?: string) => Promise<void>;
 };
 
 export const useConvoyStore = create<ConvoyState>((set) => ({
@@ -56,7 +56,7 @@ export const useConvoyStore = create<ConvoyState>((set) => ({
       set({ loading: false });
     }
   },
-  joinOne: async (id: string, code: string) => {
+  joinOne: async (id: string, code?: string) => {
     set({ loading: true, error: null });
     try {
       await joinConvoy(id, code);

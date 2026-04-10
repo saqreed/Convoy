@@ -27,7 +27,7 @@ export default function JoinConvoyPage() {
           </svg>
         </div>
         <h1 className="text-2xl font-bold text-slate-900 mb-2">Join a Convoy</h1>
-        <p className="text-slate-500">Enter the convoy ID and invite code to join</p>
+        <p className="text-slate-500">Enter the convoy ID. Invite code is only needed for private convoys.</p>
       </div>
 
       <div className="card">
@@ -42,13 +42,13 @@ export default function JoinConvoyPage() {
             />
           </div>
           <div>
-            <label className="label">Invite Code</label>
+            <label className="label">Invite Code (optional for open convoys)</label>
             <input
               value={code}
               onChange={(e) => setCode(e.target.value)}
               className="input"
-              placeholder="Enter invite code"
-              onKeyDown={(e) => e.key === 'Enter' && convoyId && code && onJoin()}
+              placeholder="Leave empty if convoy is open"
+              onKeyDown={(e) => e.key === 'Enter' && convoyId && onJoin()}
             />
           </div>
 
@@ -69,7 +69,7 @@ export default function JoinConvoyPage() {
 
           <button
             onClick={onJoin}
-            disabled={loading || !convoyId || !code}
+            disabled={loading || !convoyId}
             className="btn-primary w-full"
           >
             {loading ? (
