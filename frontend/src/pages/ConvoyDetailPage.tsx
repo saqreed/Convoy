@@ -2,15 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useConvoyStore } from '../store/convoys';
 import { useAuthStore } from '../store/auth';
-import type { ChatMessage, ConvoyEvent, ForumPost, LocationPoint, Poll, RoutedRoute, Track, UUID } from '../types';
+import type { ChatMessage, ConvoyEvent, ForumComment, ForumPost, LocationPoint, Poll, RoutedRoute, Track, UUID } from '../types';
 import { ConvoyWsClient, type WsEvent } from '../lib/wsClient';
 import {
   addConvoyMemberByPhone,
   buildRoute,
   closePoll,
+  createForumComment,
   createForumPost,
   createPoll,
   createRandomConvoyEvent,
+  deleteForumComment,
   deleteForumPost,
   getConvoyMessages,
   getTracks,
@@ -21,6 +23,7 @@ import {
   reverseGeocode,
   transferConvoyLeader,
   updateConvoy,
+  updateForumComment,
   updateForumPost,
   votePoll
 } from '../lib/mockApi';
@@ -83,8 +86,25 @@ type WsDataConvoyJoined = { type: 'convoy:joined'; convoyId: string; timestamp?:
 type WsDataMemberUpdate = { type: 'member:update'; userId: string; payload: { lat: number; lon: number; speed?: number; heading?: number; timestamp: number } };
 type WsDataMemberStatus = { type: 'member:status'; userId: string; payload: { status: string } };
 type WsDataSos = { type: 'sos'; userId: string; payload: { lat: number; lon: number; message?: string } };
-type WsDataChatNew = { type: 'chat:new'; userId: string; message: ChatMessage };
-type KnownWsData = WsDataConvoyJoined | WsDataMemberUpdate | WsDataMemberStatus | WsDataSos | WsDataChatNew;
+type WsDataChatNew = { type: 'chat:new'; convoyId: string; userId: string; message: ChatMessage };
+type WsDataForumPostCreated = { type: 'forum:post_created'; convoyId: string; post: ForumPost };
+type WsDataForumPostUpdated = { type: 'forum:post_updated'; convoyId: string; post: ForumPost };
+type WsDataForumPostDeleted = { type: 'forum:post_deleted'; convoyId: string; postId: string };
+type WsDataForumCommentCreated = { type: 'forum:comment_created'; convoyId: string; postId: string; postUpdatedAt: string; comment: ForumComment };
+type WsDataForumCommentUpdated = { type: 'forum:comment_updated'; convoyId: string; postId: string; postUpdatedAt: string; comment: ForumComment };
+type WsDataForumCommentDeleted = { type: 'forum:comment_deleted'; convoyId: string; postId: string; commentId: string; postUpdatedAt: string };
+type KnownWsData =
+  | WsDataConvoyJoined
+  | WsDataMemberUpdate
+  | WsDataMemberStatus
+  | WsDataSos
+  | WsDataChatNew
+  | WsDataForumPostCreated
+  | WsDataForumPostUpdated
+  | WsDataForumPostDeleted
+  | WsDataForumCommentCreated
+  | WsDataForumCommentUpdated
+  | WsDataForumCommentDeleted;
 
 function colorForUserId(userId: string) {
   let hash = 0;
@@ -159,8 +179,74 @@ function isKnownWsData(data: unknown): data is KnownWsData {
   if (t === 'member:update') return typeof data.userId === 'string' && isObject(data.payload);
   if (t === 'member:status') return typeof data.userId === 'string' && isObject(data.payload);
   if (t === 'sos') return typeof data.userId === 'string' && isObject(data.payload);
-  if (t === 'chat:new') return typeof data.userId === 'string' && isObject(data.message);
+  if (t === 'chat:new') return typeof data.convoyId === 'string' && typeof data.userId === 'string' && isObject(data.message);
+  if (t === 'forum:post_created') return typeof data.convoyId === 'string' && isObject(data.post);
+  if (t === 'forum:post_updated') return typeof data.convoyId === 'string' && isObject(data.post);
+  if (t === 'forum:post_deleted') return typeof data.convoyId === 'string' && typeof data.postId === 'string';
+  if (t === 'forum:comment_created') return typeof data.convoyId === 'string' && typeof data.postId === 'string' && isObject(data.comment);
+  if (t === 'forum:comment_updated') return typeof data.convoyId === 'string' && typeof data.postId === 'string' && isObject(data.comment);
+  if (t === 'forum:comment_deleted') return typeof data.convoyId === 'string' && typeof data.postId === 'string' && typeof data.commentId === 'string';
   return false;
+}
+
+function normalizeForumPost(post: ForumPost): ForumPost {
+  const comments = Array.isArray(post.comments) ? post.comments : [];
+  return {
+    ...post,
+    comments,
+    commentCount: typeof post.commentCount === 'number' ? post.commentCount : comments.length
+  };
+}
+
+function sortForumPosts(posts: ForumPost[]) {
+  return [...posts].sort((left, right) => {
+    if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
+    return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+  });
+}
+
+function upsertForumPost(posts: ForumPost[], incoming: ForumPost) {
+  const normalized = normalizeForumPost(incoming);
+  const exists = posts.some((post) => post.id === normalized.id);
+  const next = exists
+    ? posts.map((post) => (post.id === normalized.id ? normalized : post))
+    : [normalized, ...posts];
+  return sortForumPosts(next).slice(0, 50);
+}
+
+function upsertForumComment(posts: ForumPost[], postId: string, incoming: ForumComment, postUpdatedAt?: string) {
+  return sortForumPosts(posts.map((post) => {
+    if (post.id !== postId) return post;
+    const comments = Array.isArray(post.comments) ? post.comments : [];
+    const commentCount = typeof post.commentCount === 'number' ? post.commentCount : comments.length;
+    const exists = comments.some((comment) => comment.id === incoming.id);
+    const nextComments = exists
+      ? comments.map((comment) => (comment.id === incoming.id ? incoming : comment))
+      : [...comments, incoming];
+    nextComments.sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+    return {
+      ...post,
+      updatedAt: postUpdatedAt || post.updatedAt,
+      comments: nextComments,
+      commentCount: exists ? commentCount : commentCount + 1
+    };
+  }));
+}
+
+function removeForumComment(posts: ForumPost[], postId: string, commentId: string, postUpdatedAt?: string) {
+  return sortForumPosts(posts.map((post) => {
+    if (post.id !== postId) return post;
+    const comments = Array.isArray(post.comments) ? post.comments : [];
+    const commentCount = typeof post.commentCount === 'number' ? post.commentCount : comments.length;
+    const nextComments = comments.filter((comment) => comment.id !== commentId);
+    const removed = nextComments.length !== comments.length;
+    return {
+      ...post,
+      updatedAt: postUpdatedAt || post.updatedAt,
+      comments: nextComments,
+      commentCount: removed ? Math.max(0, commentCount - 1) : commentCount
+    };
+  }));
 }
 
 export default function ConvoyDetailPage() {
@@ -251,6 +337,10 @@ export default function ConvoyDetailPage() {
   const [forumBody, setForumBody] = useState('');
   const [forumSaving, setForumSaving] = useState(false);
   const [editingForumPostId, setEditingForumPostId] = useState<string | null>(null);
+  const [forumCommentDrafts, setForumCommentDrafts] = useState<Record<string, string>>({});
+  const [forumCommentSavingPostId, setForumCommentSavingPostId] = useState<string | null>(null);
+  const [editingForumCommentId, setEditingForumCommentId] = useState<string | null>(null);
+  const [editingForumCommentBody, setEditingForumCommentBody] = useState('');
 
   useEffect(() => {
     setNewLeaderId('');
@@ -281,6 +371,10 @@ export default function ConvoyDetailPage() {
     setForumError(null);
     setForumSaving(false);
     setEditingForumPostId(null);
+    setForumCommentDrafts({});
+    setForumCommentSavingPostId(null);
+    setEditingForumCommentId(null);
+    setEditingForumCommentBody('');
   }, [current?.id]);
 
   const refreshPolls = useCallback(() => {
@@ -308,7 +402,7 @@ export default function ConvoyDetailPage() {
     setForumLoading(true);
     setForumError(null);
     listForumPosts(id, { limit: 50 })
-      .then((posts) => setForumPosts(posts))
+      .then((posts) => setForumPosts(sortForumPosts(posts.map(normalizeForumPost))))
       .catch((e) => setForumError(e instanceof Error ? e.message : 'Failed to load forum'))
       .finally(() => setForumLoading(false));
   }, [id, token]);
@@ -331,21 +425,22 @@ export default function ConvoyDetailPage() {
     setForumSaving(true);
     setForumError(null);
     try {
+      let saved: ForumPost;
       if (editingForumPostId) {
-        await updateForumPost(id, editingForumPostId, { title, body });
+        saved = await updateForumPost(id, editingForumPostId, { title, body });
       } else {
-        await createForumPost(id, { title, body });
+        saved = await createForumPost(id, { title, body });
       }
       setForumTitle('');
       setForumBody('');
       setEditingForumPostId(null);
-      refreshForumPosts();
+      setForumPosts((prev) => upsertForumPost(prev, saved));
     } catch (e) {
       setForumError(e instanceof Error ? e.message : 'Failed to save forum post');
     } finally {
       setForumSaving(false);
     }
-  }, [editingForumPostId, forumBody, forumTitle, id, refreshForumPosts]);
+  }, [editingForumPostId, forumBody, forumTitle, id]);
 
   const startForumEdit = useCallback((post: ForumPost) => {
     setEditingForumPostId(post.id);
@@ -360,6 +455,54 @@ export default function ConvoyDetailPage() {
     setForumBody('');
     setForumError(null);
   }, []);
+
+  const submitForumComment = useCallback(async (postId: string) => {
+    if (!id) return;
+    const body = (forumCommentDrafts[postId] || '').trim();
+    if (!body) return;
+
+    setForumCommentSavingPostId(postId);
+    setForumError(null);
+    try {
+      const comment = await createForumComment(id, postId, { body });
+      setForumCommentDrafts((prev) => ({ ...prev, [postId]: '' }));
+      setForumPosts((prev) => upsertForumComment(prev, postId, comment, comment.updatedAt));
+    } catch (e) {
+      setForumError(e instanceof Error ? e.message : 'Failed to save comment');
+    } finally {
+      setForumCommentSavingPostId(null);
+    }
+  }, [forumCommentDrafts, id]);
+
+  const startForumCommentEdit = useCallback((comment: ForumComment) => {
+    setEditingForumCommentId(comment.id);
+    setEditingForumCommentBody(comment.body);
+    setForumError(null);
+  }, []);
+
+  const cancelForumCommentEdit = useCallback(() => {
+    setEditingForumCommentId(null);
+    setEditingForumCommentBody('');
+    setForumError(null);
+  }, []);
+
+  const submitForumCommentEdit = useCallback(async (postId: string, commentId: string) => {
+    if (!id) return;
+    const body = editingForumCommentBody.trim();
+    if (!body) return;
+
+    setForumCommentSavingPostId(postId);
+    setForumError(null);
+    try {
+      const comment = await updateForumComment(id, postId, commentId, { body });
+      setForumPosts((prev) => upsertForumComment(prev, postId, comment, comment.updatedAt));
+      cancelForumCommentEdit();
+    } catch (e) {
+      setForumError(e instanceof Error ? e.message : 'Failed to update comment');
+    } finally {
+      setForumCommentSavingPostId(null);
+    }
+  }, [cancelForumCommentEdit, editingForumCommentBody, id]);
 
   const membersMerged = useMemo(() => {
     const byId: Record<string, { name?: string; phone?: string } & MemberLive> = {};
@@ -411,24 +554,51 @@ export default function ConvoyDetailPage() {
         setJoined(true);
         return;
       case 'chat:new': {
+        if (data.convoyId !== id) return;
         const msg = data.message as unknown;
         if (!isObject(msg)) return;
         const m = msg as Record<string, unknown>;
-        const id = m['id'];
+        const messageId = m['id'];
         const convoyId = m['convoyId'];
         const userId = m['userId'];
         const text = m['text'];
         const createdAt = m['createdAt'];
-        if (typeof id !== 'string' || typeof convoyId !== 'string' || typeof userId !== 'string' || typeof text !== 'string' || typeof createdAt !== 'string') {
+        if (typeof messageId !== 'string' || typeof convoyId !== 'string' || typeof userId !== 'string' || typeof text !== 'string' || typeof createdAt !== 'string') {
           return;
         }
-        const normalized: ChatMessage = { id, convoyId: convoyId as UUID, userId: userId as UUID, text, createdAt };
+        const normalized: ChatMessage = { id: messageId, convoyId: convoyId as UUID, userId: userId as UUID, text, createdAt };
         setChatMessages((prev) => {
           if (prev.some((x) => x.id === normalized.id)) return prev;
           return [...prev, normalized].slice(-200);
         });
         return;
       }
+      case 'forum:post_created':
+        if (data.convoyId !== id) return;
+        setForumPosts((prev) => upsertForumPost(prev, data.post));
+        return;
+      case 'forum:post_updated':
+        if (data.convoyId !== id) return;
+        setForumPosts((prev) => upsertForumPost(prev, data.post));
+        return;
+      case 'forum:post_deleted':
+        if (data.convoyId !== id) return;
+        setForumPosts((prev) => prev.filter((post) => post.id !== data.postId));
+        if (editingForumPostId === data.postId) cancelForumEdit();
+        return;
+      case 'forum:comment_created':
+        if (data.convoyId !== id) return;
+        setForumPosts((prev) => upsertForumComment(prev, data.postId, data.comment, data.postUpdatedAt));
+        return;
+      case 'forum:comment_updated':
+        if (data.convoyId !== id) return;
+        setForumPosts((prev) => upsertForumComment(prev, data.postId, data.comment, data.postUpdatedAt));
+        return;
+      case 'forum:comment_deleted':
+        if (data.convoyId !== id) return;
+        setForumPosts((prev) => removeForumComment(prev, data.postId, data.commentId, data.postUpdatedAt));
+        if (editingForumCommentId === data.commentId) cancelForumCommentEdit();
+        return;
       case 'member:update': {
         const userId = data.userId;
         const payload = data.payload;
@@ -480,7 +650,7 @@ export default function ConvoyDetailPage() {
       default:
         return;
     }
-  }, []);
+  }, [cancelForumCommentEdit, cancelForumEdit, editingForumCommentId, editingForumPostId, id]);
 
   // Load chat history
   useEffect(() => {
@@ -1432,8 +1602,8 @@ export default function ConvoyDetailPage() {
                                 if (!id) return;
                                 setForumError(null);
                                 try {
-                                  await updateForumPost(id, post.id, { pinned: !post.pinned });
-                                  refreshForumPosts();
+                                  const updated = await updateForumPost(id, post.id, { pinned: !post.pinned });
+                                  setForumPosts((prev) => upsertForumPost(prev, updated));
                                 } catch (e) {
                                   setForumError(e instanceof Error ? e.message : 'Failed to update pin');
                                 }
@@ -1458,7 +1628,7 @@ export default function ConvoyDetailPage() {
                                 try {
                                   await deleteForumPost(id, post.id);
                                   if (editingForumPostId === post.id) cancelForumEdit();
-                                  refreshForumPosts();
+                                  setForumPosts((prev) => prev.filter((item) => item.id !== post.id));
                                 } catch (e) {
                                   setForumError(e instanceof Error ? e.message : 'Failed to delete forum post');
                                 }
@@ -1471,6 +1641,105 @@ export default function ConvoyDetailPage() {
                       </div>
                       <div className="mt-3 whitespace-pre-wrap break-words text-sm text-slate-700">
                         {post.body}
+                      </div>
+                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Replies</div>
+                          <div className="text-xs text-slate-500">{post.commentCount} comments</div>
+                        </div>
+                        <div className="mt-3 space-y-2">
+                          {post.comments.length === 0 ? (
+                            <div className="text-sm text-slate-500">No replies yet.</div>
+                          ) : (
+                            post.comments.map((comment) => {
+                              const commentAuthor = comment.author?.name || comment.author?.phone || nameByUserId.get(comment.authorId) || comment.authorId.slice(0, 8);
+                              const canManageComment = isLeader || comment.authorId === myUserId;
+                              const editingThisComment = editingForumCommentId === comment.id;
+                              return (
+                                <div key={comment.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                    <div className="text-xs text-slate-500">
+                                      {commentAuthor} • {new Date(comment.updatedAt).toLocaleString()}
+                                    </div>
+                                    {canManageComment && (
+                                      <div className="flex gap-2">
+                                        <button type="button" className="btn-secondary" onClick={() => startForumCommentEdit(comment)}>
+                                          Edit
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn-danger"
+                                          onClick={async () => {
+                                            if (!id) return;
+                                            if (!window.confirm('Delete this reply?')) return;
+                                            setForumError(null);
+                                            try {
+                                              await deleteForumComment(id, post.id, comment.id);
+                                              setForumPosts((prev) => removeForumComment(prev, post.id, comment.id, new Date().toISOString()));
+                                              if (editingThisComment) cancelForumCommentEdit();
+                                            } catch (e) {
+                                              setForumError(e instanceof Error ? e.message : 'Failed to delete reply');
+                                            }
+                                          }}
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                  {editingThisComment ? (
+                                    <div className="mt-2 space-y-2">
+                                      <textarea
+                                        value={editingForumCommentBody}
+                                        onChange={(event) => setEditingForumCommentBody(event.target.value)}
+                                        className="input"
+                                        rows={3}
+                                      />
+                                      <div className="flex flex-wrap gap-2">
+                                        <button
+                                          type="button"
+                                          className="btn-primary"
+                                          disabled={forumCommentSavingPostId === post.id || !editingForumCommentBody.trim()}
+                                          onClick={() => submitForumCommentEdit(post.id, comment.id)}
+                                        >
+                                          {forumCommentSavingPostId === post.id ? 'Saving...' : 'Save Reply'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn-secondary"
+                                          onClick={cancelForumCommentEdit}
+                                          disabled={forumCommentSavingPostId === post.id}
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700">
+                                      {comment.body}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                          <input
+                            value={forumCommentDrafts[post.id] || ''}
+                            onChange={(event) => setForumCommentDrafts((prev) => ({ ...prev, [post.id]: event.target.value }))}
+                            className="input"
+                            placeholder="Reply to this discussion..."
+                          />
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            disabled={forumCommentSavingPostId === post.id || !(forumCommentDrafts[post.id] || '').trim()}
+                            onClick={() => submitForumComment(post.id)}
+                          >
+                            {forumCommentSavingPostId === post.id ? 'Sending...' : 'Reply'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );

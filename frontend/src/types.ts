@@ -128,6 +128,19 @@ export interface ForumPost {
   createdAt: string;
   updatedAt: string;
   author?: User;
+  comments: ForumComment[];
+  commentCount: number;
+}
+
+export interface ForumComment {
+  id: UUID;
+  postId: UUID;
+  convoyId: UUID;
+  authorId: UUID;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  author?: User;
 }
 
 export interface User {

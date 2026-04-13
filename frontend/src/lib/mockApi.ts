@@ -4,6 +4,7 @@ import type {
   ConvoyDetail,
   ConvoyEvent,
   ConvoyPublicPreview,
+  ForumComment,
   ConvoyWithInvite,
   ForumPost,
   GeocodeSearchResult,
@@ -286,6 +287,33 @@ export async function updateForumPost(
 
 export async function deleteForumPost(convoyId: string, postId: string) {
   return request<{ ok: boolean }>(`/convoys/${convoyId}/forum-posts/${postId}`, {
+    method: 'DELETE'
+  });
+}
+
+export async function listForumComments(convoyId: string, postId: string, query?: { limit?: number }) {
+  const qs = new URLSearchParams();
+  if (typeof query?.limit === 'number') qs.set('limit', String(query.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return request<ForumComment[]>(`/convoys/${convoyId}/forum-posts/${postId}/comments${suffix}`);
+}
+
+export async function createForumComment(convoyId: string, postId: string, input: { body: string }) {
+  return request<ForumComment>(`/convoys/${convoyId}/forum-posts/${postId}/comments`, {
+    method: 'POST',
+    body: input
+  });
+}
+
+export async function updateForumComment(convoyId: string, postId: string, commentId: string, input: { body: string }) {
+  return request<ForumComment>(`/convoys/${convoyId}/forum-posts/${postId}/comments/${commentId}`, {
+    method: 'PATCH',
+    body: input
+  });
+}
+
+export async function deleteForumComment(convoyId: string, postId: string, commentId: string) {
+  return request<{ ok: boolean }>(`/convoys/${convoyId}/forum-posts/${postId}/comments/${commentId}`, {
     method: 'DELETE'
   });
 }

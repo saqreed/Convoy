@@ -6,6 +6,7 @@ import { createAuthHandler } from './handlers/authHandler';
 import { createChatHandler } from './handlers/chatHandler';
 import { createConvoyHandler } from './handlers/convoyHandler';
 import { createPingHandler } from './handlers/pingHandler';
+import { setConvoyBroadcast } from './broadcast';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
@@ -43,6 +44,8 @@ export function createWsGateway(server: Server) {
       }
     }
   }
+
+  setConvoyBroadcast(broadcastToRoom);
 
   const lastPingAt = new Map<string, number>();
 

@@ -1,6 +1,5 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
-import fastifyJwt from '@fastify/jwt';
 import sensible from '@fastify/sensible';
 import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
@@ -8,6 +7,7 @@ import swaggerUI from '@fastify/swagger-ui';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import pino from 'pino';
+import jwt from 'jsonwebtoken';
 import { registerAuthRoutes } from './modules/auth/routes';
 import { registerChatRoutes } from './modules/chat/routes';
 import { registerConvoyRoutes } from './modules/convoys/controller';
@@ -26,8 +26,20 @@ async function buildServer() {
   const app = Fastify({ logger });
 
   await app.register(rateLimit, { max: 20, timeWindow: '1 minute' });
-  await app.register(fastifyJwt, { secret: JWT_SECRET });
   await app.register(sensible);
+  app.decorate('jwt', {
+    sign: (payload: string | Buffer | object) => jwt.sign(payload, JWT_SECRET)
+  });
+  app.decorateRequest('jwtVerify', async function jwtVerify(this: FastifyRequest) {
+    const authHeader = this.headers.authorization;
+    const token = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length)
+      : null;
+    if (!token) throw new Error('Missing bearer token');
+    const decoded = jwt.verify(token, JWT_SECRET);
+    (this as any).user = decoded;
+    return decoded;
+  });
   await app.register(cors, {
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);

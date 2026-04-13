@@ -21,6 +21,7 @@ model User {
   pollVotes     PollVote[]
   eventsCreated ConvoyEvent[]
   forumPosts    ForumPost[]
+  forumComments ForumComment[]
 }
 
 model Convoy {
@@ -52,6 +53,7 @@ model Convoy {
   polls             Poll[]
   events            ConvoyEvent[]
   forumPosts        ForumPost[]
+  forumComments     ForumComment[]
 
   @@index([privacy, status, routeMinLat, routeMaxLat, routeMinLon, routeMaxLon], map: "Convoy_open_route_bbox_idx")
   @@index([privacy, status, leaderLastPingLat, leaderLastPingLon], map: "Convoy_open_leader_ping_idx")
@@ -125,10 +127,29 @@ model ForumPost {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  convoy Convoy @relation(fields: [convoyId], references: [id])
-  author User   @relation(fields: [authorId], references: [id])
+  convoy   Convoy         @relation(fields: [convoyId], references: [id])
+  author   User           @relation(fields: [authorId], references: [id])
+  comments ForumComment[]
 
   @@index([convoyId, pinned, updatedAt])
+  @@index([authorId, updatedAt])
+}
+
+model ForumComment {
+  id        String   @id @default(uuid())
+  postId    String
+  convoyId  String
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  post   ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  convoy Convoy    @relation(fields: [convoyId], references: [id])
+  author User      @relation(fields: [authorId], references: [id])
+
+  @@index([postId, createdAt])
+  @@index([convoyId, createdAt])
   @@index([authorId, updatedAt])
 }
 

@@ -6,6 +6,9 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+
 jobs:
   backend:
     name: Backend
@@ -89,3 +92,62 @@ jobs:
         run: docker build ./backend
       - name: Build frontend image
         run: docker build ./frontend
+
+  smoke:
+    name: Compose Smoke
+    runs-on: ubuntu-latest
+    needs:
+      - backend
+      - frontend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start stack
+        run: docker compose up -d --build
+      - name: Check health endpoints
+        run: |
+          for attempt in {1..60}; do
+            if curl -fsS http://localhost:3000/health && curl -fsS http://localhost:5173/health; then
+              exit 0
+            fi
+            docker compose ps
+            sleep 2
+          done
+          docker compose logs --no-color
+          exit 1
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
+
+  publish-images:
+    name: Publish Images
+    runs-on: ubuntu-latest
+    needs:
+      - backend
+      - frontend
+      - smoke
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push backend image
+        run: |
+          IMAGE_NAMESPACE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker build \
+            -t "$IMAGE_NAMESPACE/backend:${GITHUB_SHA}" \
+            -t "$IMAGE_NAMESPACE/backend:latest" \
+            ./backend
+          docker push "$IMAGE_NAMESPACE/backend:${GITHUB_SHA}"
+          docker push "$IMAGE_NAMESPACE/backend:latest"
+      - name: Build and push frontend image
+        run: |
+          IMAGE_NAMESPACE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker build \
+            -t "$IMAGE_NAMESPACE/frontend:${GITHUB_SHA}" \
+            -t "$IMAGE_NAMESPACE/frontend:latest" \
+            ./frontend
+          docker push "$IMAGE_NAMESPACE/frontend:${GITHUB_SHA}"
+          docker push "$IMAGE_NAMESPACE/frontend:latest"

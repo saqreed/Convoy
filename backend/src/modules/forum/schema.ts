@@ -16,3 +16,15 @@ export const updateForumPostSchema = z.object({
 export const forumPostsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(30)
 });
+
+export const createForumCommentSchema = z.object({
+  body: z.string().trim().min(1).max(2000)
+});
+
+export const updateForumCommentSchema = z.object({
+  body: z.string().trim().min(1).max(2000)
+});
+
+export const forumCommentsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(100)
+});
