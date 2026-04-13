@@ -57,6 +57,14 @@ function distanceKm(a: RoutePoint, b: RoutePoint) {
   return 2 * earthRadiusKm * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
+function routeLengthKm(route: RoutePoint[]) {
+  let totalKm = 0;
+  for (let index = 1; index < route.length; index += 1) {
+    totalKm += distanceKm(route[index - 1], route[index]);
+  }
+  return Math.round(totalKm * 10) / 10;
+}
+
 export async function registerConvoyRoutes(app: FastifyInstance<any, any, any, any, any>) {
   app.addHook('preHandler', async (req: FastifyRequest) => {
     try {
@@ -124,6 +132,8 @@ export async function registerConvoyRoutes(app: FastifyInstance<any, any, any, a
 
     const query = nearbyOpenConvoysQuerySchema.parse(req.query);
     const origin: RoutePoint = { lat: query.lat, lon: query.lon };
+    const startAfterMs = query.startAfter ? Date.parse(query.startAfter) : null;
+    const startBeforeMs = query.startBefore ? Date.parse(query.startBefore) : null;
 
     // TODO: move nearby discovery to PostGIS or another geo index once the
     // open convoy catalog grows beyond a safe in-memory scan.
@@ -146,9 +156,20 @@ export async function registerConvoyRoutes(app: FastifyInstance<any, any, any, a
     const nearby = convoys
       .map((convoy) => {
         const route = readRoutePoints(convoy.route);
+        const totalRouteLengthKm = routeLengthKm(route);
         const leaderMember = convoy.members.find((member) => member.userId === convoy.leaderId);
         const leaderLastPing = readLastPingPoint(leaderMember?.lastPing);
         const anchors = leaderLastPing ? [leaderLastPing, ...route] : route;
+
+        if (query.status && convoy.status !== query.status) return null;
+        if (startAfterMs !== null) {
+          if (!convoy.startTime || convoy.startTime.getTime() < startAfterMs) return null;
+        }
+        if (startBeforeMs !== null) {
+          if (!convoy.startTime || convoy.startTime.getTime() > startBeforeMs) return null;
+        }
+        if (typeof query.minRouteKm === 'number' && totalRouteLengthKm < query.minRouteKm) return null;
+        if (typeof query.maxRouteKm === 'number' && totalRouteLengthKm > query.maxRouteKm) return null;
 
         let closestPoint: RoutePoint | null = null;
         let closestDistanceKm = Number.POSITIVE_INFINITY;
@@ -173,6 +194,7 @@ export async function registerConvoyRoutes(app: FastifyInstance<any, any, any, a
           createdAt: convoy.createdAt,
           memberCount: convoy.members.length,
           routePointCount: route.length,
+          routeLengthKm: totalRouteLengthKm,
           startPoint: route[0] ?? null,
           endPoint: route.length > 0 ? route[route.length - 1] : null,
           closestPoint,
@@ -185,6 +207,56 @@ export async function registerConvoyRoutes(app: FastifyInstance<any, any, any, a
       .slice(0, query.limit);
 
     return { success: true, data: nearby };
+  });
+
+  app.get('/convoys/:id/preview', {
+    schema: {
+      params: { $ref: 'IdParams#' },
+      response: { 200: { $ref: 'SuccessEnvelopeConvoyPublicPreview#' } }
+    },
+    config: { rateLimit: { max: 60, timeWindow: '1 minute' } }
+  }, async (req: FastifyRequest) => {
+    const userId = authGuard(req);
+    if (!userId) return app.httpErrors.unauthorized();
+
+    const convoyId = (req.params as any).id as string;
+    const convoy = await prisma.convoy.findUnique({
+      where: { id: convoyId },
+      include: {
+        leader: true,
+        members: {
+          select: {
+            userId: true
+          }
+        }
+      }
+    });
+    if (!convoy) return app.httpErrors.notFound();
+
+    const isMember = convoy.members.some((member) => member.userId === userId);
+    if (convoy.privacy !== 'open' && !isMember) return app.httpErrors.forbidden();
+
+    const route = readRoutePoints(convoy.route);
+    const preview = {
+      id: convoy.id,
+      title: convoy.title,
+      leaderId: convoy.leaderId,
+      status: convoy.status,
+      privacy: convoy.privacy,
+      startTime: convoy.startTime,
+      createdAt: convoy.createdAt,
+      leader: convoy.leader,
+      memberCount: convoy.members.length,
+      routePointCount: route.length,
+      routeLengthKm: routeLengthKm(route),
+      route,
+      startPoint: route[0] ?? null,
+      endPoint: route.length > 0 ? route[route.length - 1] : null,
+      inviteRequired: convoy.privacy !== 'open',
+      alreadyJoined: isMember
+    };
+
+    return { success: true, data: preview };
   });
 
   app.get('/convoys/:id', {

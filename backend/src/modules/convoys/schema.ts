@@ -21,7 +21,12 @@ export const nearbyOpenConvoysQuerySchema = z.object({
   lat: z.number().min(-90).max(90),
   lon: z.number().min(-180).max(180),
   radiusKm: z.number().min(1).max(500).default(25),
-  limit: z.number().int().min(1).max(20).default(6)
+  limit: z.number().int().min(1).max(20).default(6),
+  status: z.string().min(1).optional(),
+  startAfter: z.string().datetime().optional(),
+  startBefore: z.string().datetime().optional(),
+  minRouteKm: z.number().min(0).max(10000).optional(),
+  maxRouteKm: z.number().min(0).max(10000).optional()
 });
 
 export const transferLeaderSchema = z.object({ newLeaderId: z.string().uuid() });

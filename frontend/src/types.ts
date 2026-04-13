@@ -64,11 +64,31 @@ export interface NearbyOpenConvoy {
   createdAt: string;
   memberCount: number;
   routePointCount: number;
+  routeLengthKm: number;
   distanceKm: number;
   startPoint: LocationPoint | null;
   endPoint: LocationPoint | null;
   closestPoint: LocationPoint;
   proximitySource: 'leader-last-ping' | 'route-point';
+}
+
+export interface ConvoyPublicPreview {
+  id: UUID;
+  title: string;
+  leaderId: UUID;
+  status: string;
+  privacy: 'invite' | 'open';
+  startTime: string | null;
+  createdAt: string;
+  leader: User;
+  memberCount: number;
+  routePointCount: number;
+  routeLengthKm: number;
+  route: LocationPoint[];
+  startPoint: LocationPoint | null;
+  endPoint: LocationPoint | null;
+  inviteRequired: boolean;
+  alreadyJoined: boolean;
 }
 
 export interface PollOption {

@@ -304,7 +304,12 @@ async function buildServer() {
       lat: { type: 'number', minimum: -90, maximum: 90 },
       lon: { type: 'number', minimum: -180, maximum: 180 },
       radiusKm: { type: 'number', minimum: 1, maximum: 500, default: 25 },
-      limit: { type: 'integer', minimum: 1, maximum: 20, default: 6 }
+      limit: { type: 'integer', minimum: 1, maximum: 20, default: 6 },
+      status: { type: 'string', minLength: 1 },
+      startAfter: { type: 'string', format: 'date-time' },
+      startBefore: { type: 'string', format: 'date-time' },
+      minRouteKm: { type: 'number', minimum: 0, maximum: 10000 },
+      maxRouteKm: { type: 'number', minimum: 0, maximum: 10000 }
     },
     additionalProperties: false
   });
@@ -320,6 +325,7 @@ async function buildServer() {
       'createdAt',
       'memberCount',
       'routePointCount',
+      'routeLengthKm',
       'distanceKm',
       'closestPoint',
       'proximitySource'
@@ -334,6 +340,7 @@ async function buildServer() {
       createdAt: { type: 'string', format: 'date-time' },
       memberCount: { type: 'integer', minimum: 0 },
       routePointCount: { type: 'integer', minimum: 0 },
+      routeLengthKm: { type: 'number', minimum: 0 },
       distanceKm: { type: 'number', minimum: 0 },
       startPoint: { anyOf: [{ $ref: 'LocationPoint#' }, { type: 'null' }] },
       endPoint: { anyOf: [{ $ref: 'LocationPoint#' }, { type: 'null' }] },
@@ -349,6 +356,53 @@ async function buildServer() {
     properties: {
       success: { type: 'boolean', const: true },
       data: { type: 'array', items: { $ref: 'NearbyOpenConvoy#' } }
+    }
+  });
+  addSharedSchema({
+    $id: 'ConvoyPublicPreview',
+    type: 'object',
+    required: [
+      'id',
+      'title',
+      'leaderId',
+      'status',
+      'privacy',
+      'createdAt',
+      'leader',
+      'memberCount',
+      'routePointCount',
+      'routeLengthKm',
+      'route',
+      'inviteRequired',
+      'alreadyJoined'
+    ],
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      title: { type: 'string' },
+      leaderId: { type: 'string', format: 'uuid' },
+      status: { type: 'string' },
+      privacy: { type: 'string', enum: ['invite', 'open'] },
+      startTime: { type: ['string', 'null'], format: 'date-time' },
+      createdAt: { type: 'string', format: 'date-time' },
+      leader: { $ref: 'User#' },
+      memberCount: { type: 'integer', minimum: 0 },
+      routePointCount: { type: 'integer', minimum: 0 },
+      routeLengthKm: { type: 'number', minimum: 0 },
+      route: { type: 'array', items: { $ref: 'LocationPoint#' } },
+      startPoint: { anyOf: [{ $ref: 'LocationPoint#' }, { type: 'null' }] },
+      endPoint: { anyOf: [{ $ref: 'LocationPoint#' }, { type: 'null' }] },
+      inviteRequired: { type: 'boolean' },
+      alreadyJoined: { type: 'boolean' }
+    },
+    additionalProperties: false
+  });
+  addSharedSchema({
+    $id: 'SuccessEnvelopeConvoyPublicPreview',
+    type: 'object',
+    required: ['success', 'data'],
+    properties: {
+      success: { type: 'boolean', const: true },
+      data: { $ref: 'ConvoyPublicPreview#' }
     }
   });
 

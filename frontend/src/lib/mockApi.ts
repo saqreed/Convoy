@@ -3,6 +3,7 @@ import type {
   Convoy,
   ConvoyDetail,
   ConvoyEvent,
+  ConvoyPublicPreview,
   ConvoyWithInvite,
   GeocodeSearchResult,
   LocationPoint,
@@ -113,6 +114,11 @@ export async function listNearbyOpenConvoys(query: {
   lon: number;
   radiusKm?: number;
   limit?: number;
+  status?: string;
+  startAfter?: string;
+  startBefore?: string;
+  minRouteKm?: number;
+  maxRouteKm?: number;
 }) {
   const qs = new URLSearchParams({
     lat: String(query.lat),
@@ -120,7 +126,16 @@ export async function listNearbyOpenConvoys(query: {
   });
   if (typeof query.radiusKm === 'number') qs.set('radiusKm', String(query.radiusKm));
   if (typeof query.limit === 'number') qs.set('limit', String(query.limit));
+  if (query.status) qs.set('status', query.status);
+  if (query.startAfter) qs.set('startAfter', query.startAfter);
+  if (query.startBefore) qs.set('startBefore', query.startBefore);
+  if (typeof query.minRouteKm === 'number') qs.set('minRouteKm', String(query.minRouteKm));
+  if (typeof query.maxRouteKm === 'number') qs.set('maxRouteKm', String(query.maxRouteKm));
   return request<NearbyOpenConvoy[]>(`/convoys/open/nearby?${qs.toString()}`);
+}
+
+export async function getConvoyPublicPreview(convoyId: string) {
+  return request<ConvoyPublicPreview>(`/convoys/${convoyId}/preview`);
 }
 
 export async function updateConvoy(
