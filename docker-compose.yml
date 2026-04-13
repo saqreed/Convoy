@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: convoy
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d convoy"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/convoy?schema=public
+      JWT_SECRET: please_change_me_to_a_long_random_secret_key_32chars_min
+      PORT: 3000
+      WS_TTL_SECONDS: 120
+      WS_MIN_PING_INTERVAL_MS: 3000
+      OSRM_BASE_URL: https://router.project-osrm.org
+      NOMINATIM_BASE_URL: https://nominatim.openstreetmap.org
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:3000
+        VITE_WS_URL: ws://localhost:3000/ws
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
