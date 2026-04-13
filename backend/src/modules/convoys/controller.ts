@@ -9,29 +9,20 @@ import {
 } from './schema';
 import { ConvoyService } from './service';
 import { prisma } from '../../db/client';
+import {
+  buildRouteMetadata,
+  distanceKm,
+  geoBoundingBoxes,
+  readRoutePoints,
+  routeLengthKm,
+  type RoutePoint
+} from './routeMetadata';
 
 const service = new ConvoyService();
-
-type RoutePoint = {
-  lat: number;
-  lon: number;
-  name?: string;
-};
 
 function authGuard(req: FastifyRequest) {
   // @ts-ignore
   return (req as any).user?.userId as string | undefined;
-}
-
-function isRoutePoint(value: unknown): value is RoutePoint {
-  if (!value || typeof value !== 'object') return false;
-  const point = value as Record<string, unknown>;
-  return typeof point.lat === 'number' && typeof point.lon === 'number';
-}
-
-function readRoutePoints(route: unknown): RoutePoint[] {
-  if (!Array.isArray(route)) return [];
-  return route.filter(isRoutePoint);
 }
 
 function readLastPingPoint(lastPing: unknown): RoutePoint | null {
@@ -39,30 +30,6 @@ function readLastPingPoint(lastPing: unknown): RoutePoint | null {
   const point = lastPing as Record<string, unknown>;
   if (typeof point.lat !== 'number' || typeof point.lon !== 'number') return null;
   return { lat: point.lat, lon: point.lon };
-}
-
-function toRadians(value: number) {
-  return (value * Math.PI) / 180;
-}
-
-function distanceKm(a: RoutePoint, b: RoutePoint) {
-  const earthRadiusKm = 6371;
-  const dLat = toRadians(b.lat - a.lat);
-  const dLon = toRadians(b.lon - a.lon);
-  const lat1 = toRadians(a.lat);
-  const lat2 = toRadians(b.lat);
-  const haversine =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  return 2 * earthRadiusKm * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
-}
-
-function routeLengthKm(route: RoutePoint[]) {
-  let totalKm = 0;
-  for (let index = 1; index < route.length; index += 1) {
-    totalKm += distanceKm(route[index - 1], route[index]);
-  }
-  return Math.round(totalKm * 10) / 10;
 }
 
 export async function registerConvoyRoutes(app: FastifyInstance<any, any, any, any, any>) {
@@ -132,16 +99,43 @@ export async function registerConvoyRoutes(app: FastifyInstance<any, any, any, a
 
     const query = nearbyOpenConvoysQuerySchema.parse(req.query);
     const origin: RoutePoint = { lat: query.lat, lon: query.lon };
-    const startAfterMs = query.startAfter ? Date.parse(query.startAfter) : null;
-    const startBeforeMs = query.startBefore ? Date.parse(query.startBefore) : null;
+    const archivedStatuses = ['completed', 'cancelled', 'archived'];
+    const geoBoxes = geoBoundingBoxes(origin, query.radiusKm);
+    const geoPrefilter = geoBoxes.flatMap((box) => [
+      {
+        routeMinLat: { lte: box.maxLat },
+        routeMaxLat: { gte: box.minLat },
+        routeMinLon: { lte: box.maxLon },
+        routeMaxLon: { gte: box.minLon }
+      },
+      {
+        leaderLastPingLat: { gte: box.minLat, lte: box.maxLat },
+        leaderLastPingLon: { gte: box.minLon, lte: box.maxLon }
+      }
+    ]);
 
-    // TODO: move nearby discovery to PostGIS or another geo index once the
-    // open convoy catalog grows beyond a safe in-memory scan.
     const convoys = await prisma.convoy.findMany({
       where: {
         privacy: 'open',
-        status: { notIn: ['completed', 'cancelled', 'archived'] },
-        members: { none: { userId } }
+        status: query.status ? { equals: query.status, notIn: archivedStatuses } : { notIn: archivedStatuses },
+        members: { none: { userId } },
+        OR: geoPrefilter,
+        ...(query.startAfter || query.startBefore
+          ? {
+              startTime: {
+                ...(query.startAfter ? { gte: new Date(query.startAfter) } : {}),
+                ...(query.startBefore ? { lte: new Date(query.startBefore) } : {})
+              }
+            }
+          : {}),
+        ...(typeof query.minRouteKm === 'number' || typeof query.maxRouteKm === 'number'
+          ? {
+              routeLengthKm: {
+                ...(typeof query.minRouteKm === 'number' ? { gte: query.minRouteKm } : {}),
+                ...(typeof query.maxRouteKm === 'number' ? { lte: query.maxRouteKm } : {})
+              }
+            }
+          : {})
       },
       include: {
         members: {
@@ -160,16 +154,6 @@ export async function registerConvoyRoutes(app: FastifyInstance<any, any, any, a
         const leaderMember = convoy.members.find((member) => member.userId === convoy.leaderId);
         const leaderLastPing = readLastPingPoint(leaderMember?.lastPing);
         const anchors = leaderLastPing ? [leaderLastPing, ...route] : route;
-
-        if (query.status && convoy.status !== query.status) return null;
-        if (startAfterMs !== null) {
-          if (!convoy.startTime || convoy.startTime.getTime() < startAfterMs) return null;
-        }
-        if (startBeforeMs !== null) {
-          if (!convoy.startTime || convoy.startTime.getTime() > startBeforeMs) return null;
-        }
-        if (typeof query.minRouteKm === 'number' && totalRouteLengthKm < query.minRouteKm) return null;
-        if (typeof query.maxRouteKm === 'number' && totalRouteLengthKm > query.maxRouteKm) return null;
 
         let closestPoint: RoutePoint | null = null;
         let closestDistanceKm = Number.POSITIVE_INFINITY;
@@ -389,7 +373,8 @@ export async function registerConvoyRoutes(app: FastifyInstance<any, any, any, a
         startTime: body.startTime === undefined ? undefined : body.startTime ? new Date(body.startTime) : null,
         route: body.route,
         privacy: body.privacy,
-        status: body.status
+        status: body.status,
+        ...(body.route === undefined ? {} : buildRouteMetadata(body.route))
       }
     });
     return { success: true, data: updated };

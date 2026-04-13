@@ -1,6 +1,6 @@
 # TODO
 
-- [ ] Перенести nearby-поиск открытых конвоев на PostGIS или другой geo-index, чтобы не сканировать все `open`-конвои в памяти.
+- [x] Перенести nearby-поиск открытых конвоев на PostGIS или другой geo-index, чтобы не сканировать все `open`-конвои в памяти.
 - [x] Добавить карту и кластеризацию для блока discovery, чтобы пользователь видел не только карточки, но и spatial context.
 - [x] Расширить nearby-выдачу фильтрами по времени старта, статусу и длине маршрута.
 - [x] Сделать pre-join preview для `open`-конвоев: краткая информация о лидере, маршруте и правилах конвоя до вступления.
@@ -9,3 +9,4 @@
 - [ ] Настроить публикацию Docker images в GitHub Container Registry после успешного CI.
 - [ ] Добавить smoke/e2e job в CI, который поднимает `docker compose up` и проверяет `/health` backend/frontend.
 - [ ] Разобрать `npm audit` для backend-зависимостей и обновить небезопасные пакеты без breaking changes.
+- [ ] При росте каталога заменить bounding-box индексы nearby discovery на PostGIS `geography` + GiST для точного geo-поиска по route geometry.

@@ -1,4 +1,5 @@
 import { prisma } from '../../db/client';
+import { buildRouteMetadata } from './routeMetadata';
 
 export class ConvoyRepository {
   async createConvoy(leaderId: string, data: { title: string; startTime?: string; route: any; privacy: 'invite' | 'open' }) {
@@ -8,7 +9,8 @@ export class ConvoyRepository {
         leaderId,
         startTime: data.startTime ? new Date(data.startTime) : undefined,
         privacy: data.privacy,
-        route: data.route
+        route: data.route,
+        ...buildRouteMetadata(data.route)
       }
     });
     await prisma.convoyMember.create({ data: { convoyId: convoy.id, userId: leaderId, role: 'leader' } });
@@ -41,7 +43,8 @@ export class ConvoyRepository {
         startTime: data.startTime === undefined ? undefined : data.startTime ? new Date(data.startTime) : null,
         privacy: data.privacy,
         route: data.route,
-        status: data.status
+        status: data.status,
+        ...(data.route === undefined ? {} : buildRouteMetadata(data.route))
       }
     });
   }

@@ -72,6 +72,15 @@ export function createPingHandler(
         data: { lastPing: { lat: p.lat, lon: p.lon, speed: p.speed, heading: p.heading, timestamp: p.timestamp } as any }
       }).catch(() => Promise.resolve());
 
+      await (prisma as any).convoy.updateMany({
+        where: { id: convoyId, leaderId: userId },
+        data: {
+          leaderLastPingLat: p.lat,
+          leaderLastPingLon: p.lon,
+          leaderLastPingAt: new Date(p.timestamp)
+        }
+      }).catch(() => Promise.resolve());
+
       ctx.broadcastToRoom(convoyId, {
         success: true,
         data: {
