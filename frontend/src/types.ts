@@ -118,6 +118,18 @@ export interface ConvoyEvent {
   createdAt: string;
 }
 
+export interface ForumPost {
+  id: UUID;
+  convoyId: UUID;
+  authorId: UUID;
+  title: string;
+  body: string;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+  author?: User;
+}
+
 export interface User {
   id: UUID;
   name?: string;

@@ -12,6 +12,7 @@ import { registerAuthRoutes } from './modules/auth/routes';
 import { registerChatRoutes } from './modules/chat/routes';
 import { registerConvoyRoutes } from './modules/convoys/controller';
 import { registerEventRoutes } from './modules/events/routes';
+import { registerForumRoutes } from './modules/forum/routes';
 import { registerGeocodingRoutes } from './modules/geocoding/routes';
 import { registerPollRoutes } from './modules/polls/routes';
 import { registerRoutingRoutes } from './modules/routing/routes';
@@ -494,6 +495,7 @@ async function buildServer() {
   await registerConvoyRoutes(app);
   await registerPollRoutes(app);
   await registerEventRoutes(app);
+  await registerForumRoutes(app);
   await registerGeocodingRoutes(app);
   await registerRoutingRoutes(app);
 

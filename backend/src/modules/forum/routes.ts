@@ -1,0 +1,1 @@
+export { registerForumRoutes } from './controller';

@@ -20,6 +20,7 @@ model User {
   pollsCreated Poll[]
   pollVotes PollVote[]
   eventsCreated ConvoyEvent[]
+  forumPosts ForumPost[]
 }
 
 model Convoy {
@@ -37,6 +38,7 @@ model Convoy {
   chatMessages ChatMessage[]
   polls     Poll[]
   events    ConvoyEvent[]
+  forumPosts ForumPost[]
 }
 
 model Poll {
@@ -93,6 +95,23 @@ model ConvoyEvent {
   createdBy   User?    @relation(fields: [createdById], references: [id])
 
   @@index([convoyId, createdAt])
+}
+
+model ForumPost {
+  id        String   @id @default(uuid())
+  convoyId  String
+  authorId  String
+  title     String
+  body      String
+  pinned    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  convoy    Convoy   @relation(fields: [convoyId], references: [id])
+  author    User     @relation(fields: [authorId], references: [id])
+
+  @@index([convoyId, pinned, updatedAt])
+  @@index([authorId, updatedAt])
 }
 
 model ChatMessage {

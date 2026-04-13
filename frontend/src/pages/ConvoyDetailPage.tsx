@@ -2,22 +2,26 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useConvoyStore } from '../store/convoys';
 import { useAuthStore } from '../store/auth';
-import type { ChatMessage, ConvoyEvent, LocationPoint, Poll, RoutedRoute, Track, UUID } from '../types';
+import type { ChatMessage, ConvoyEvent, ForumPost, LocationPoint, Poll, RoutedRoute, Track, UUID } from '../types';
 import { ConvoyWsClient, type WsEvent } from '../lib/wsClient';
 import {
   addConvoyMemberByPhone,
   buildRoute,
   closePoll,
+  createForumPost,
   createPoll,
   createRandomConvoyEvent,
+  deleteForumPost,
   getConvoyMessages,
   getTracks,
   kickConvoyMember,
   listConvoyEvents,
+  listForumPosts,
   listPolls,
   reverseGeocode,
   transferConvoyLeader,
   updateConvoy,
+  updateForumPost,
   votePoll
 } from '../lib/mockApi';
 
@@ -240,6 +244,14 @@ export default function ConvoyDetailPage() {
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [randomEventLoading, setRandomEventLoading] = useState(false);
 
+  const [forumPosts, setForumPosts] = useState<ForumPost[]>([]);
+  const [forumLoading, setForumLoading] = useState(false);
+  const [forumError, setForumError] = useState<string | null>(null);
+  const [forumTitle, setForumTitle] = useState('');
+  const [forumBody, setForumBody] = useState('');
+  const [forumSaving, setForumSaving] = useState(false);
+  const [editingForumPostId, setEditingForumPostId] = useState<string | null>(null);
+
   useEffect(() => {
     setNewLeaderId('');
     setTransferError(null);
@@ -263,6 +275,14 @@ export default function ConvoyDetailPage() {
     setAddMemberLoading(false);
   }, [current?.id, current?.privacy]);
 
+  useEffect(() => {
+    setForumTitle('');
+    setForumBody('');
+    setForumError(null);
+    setForumSaving(false);
+    setEditingForumPostId(null);
+  }, [current?.id]);
+
   const refreshPolls = useCallback(() => {
     if (!id || !token) return;
     setPollsLoading(true);
@@ -283,10 +303,63 @@ export default function ConvoyDetailPage() {
       .finally(() => setEventsLoading(false));
   }, [id, token]);
 
+  const refreshForumPosts = useCallback(() => {
+    if (!id || !token) return;
+    setForumLoading(true);
+    setForumError(null);
+    listForumPosts(id, { limit: 50 })
+      .then((posts) => setForumPosts(posts))
+      .catch((e) => setForumError(e instanceof Error ? e.message : 'Failed to load forum'))
+      .finally(() => setForumLoading(false));
+  }, [id, token]);
+
   useEffect(() => {
     refreshPolls();
     refreshEvents();
-  }, [refreshPolls, refreshEvents]);
+    refreshForumPosts();
+  }, [refreshPolls, refreshEvents, refreshForumPosts]);
+
+  const submitForumPost = useCallback(async () => {
+    if (!id) return;
+    const title = forumTitle.trim();
+    const body = forumBody.trim();
+    if (title.length < 3 || !body) {
+      setForumError('Forum post needs a title of at least 3 characters and a body');
+      return;
+    }
+
+    setForumSaving(true);
+    setForumError(null);
+    try {
+      if (editingForumPostId) {
+        await updateForumPost(id, editingForumPostId, { title, body });
+      } else {
+        await createForumPost(id, { title, body });
+      }
+      setForumTitle('');
+      setForumBody('');
+      setEditingForumPostId(null);
+      refreshForumPosts();
+    } catch (e) {
+      setForumError(e instanceof Error ? e.message : 'Failed to save forum post');
+    } finally {
+      setForumSaving(false);
+    }
+  }, [editingForumPostId, forumBody, forumTitle, id, refreshForumPosts]);
+
+  const startForumEdit = useCallback((post: ForumPost) => {
+    setEditingForumPostId(post.id);
+    setForumTitle(post.title);
+    setForumBody(post.body);
+    setForumError(null);
+  }, []);
+
+  const cancelForumEdit = useCallback(() => {
+    setEditingForumPostId(null);
+    setForumTitle('');
+    setForumBody('');
+    setForumError(null);
+  }, []);
 
   const membersMerged = useMemo(() => {
     const byId: Record<string, { name?: string; phone?: string } & MemberLive> = {};
@@ -1037,6 +1110,7 @@ export default function ConvoyDetailPage() {
       {routeError && <div className="bg-amber-50 text-amber-700 px-4 py-3 rounded-lg text-sm">Route: {routeError}</div>}
       {pollsError && <div className="bg-amber-50 text-amber-700 px-4 py-3 rounded-lg text-sm">Polls: {pollsError}</div>}
       {eventsError && <div className="bg-amber-50 text-amber-700 px-4 py-3 rounded-lg text-sm">Events: {eventsError}</div>}
+      {forumError && <div className="bg-amber-50 text-amber-700 px-4 py-3 rounded-lg text-sm">Forum: {forumError}</div>}
       {settingsError && <div className="bg-amber-50 text-amber-700 px-4 py-3 rounded-lg text-sm">Settings: {settingsError}</div>}
 
       {!current ? (
@@ -1165,6 +1239,10 @@ export default function ConvoyDetailPage() {
             <button type="button" className="btn-secondary" onClick={refreshEvents} disabled={eventsLoading}>
               {eventsLoading ? 'Loading events...' : 'Refresh Events'}
             </button>
+
+            <button type="button" className="btn-secondary" onClick={refreshForumPosts} disabled={forumLoading}>
+              {forumLoading ? 'Loading forum...' : 'Refresh Forum'}
+            </button>
           </div>
 
           {isLeader && current && (
@@ -1263,6 +1341,143 @@ export default function ConvoyDetailPage() {
               </div>
             </div>
           )}
+
+          <div className="card">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="font-semibold text-slate-900">Forum</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  Persistent convoy discussions for route notes, rules, stops, and decisions that should not disappear in chat.
+                </p>
+              </div>
+              <div className="text-xs text-slate-500">
+                {forumPosts.length} posts
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3">
+              <div>
+                <label className="label">{editingForumPostId ? 'Edit discussion title' : 'Discussion title'}</label>
+                <input
+                  value={forumTitle}
+                  onChange={(event) => setForumTitle(event.target.value)}
+                  className="input"
+                  placeholder="Fuel stop plan, route warning, meeting point..."
+                />
+              </div>
+              <div>
+                <label className="label">Body</label>
+                <textarea
+                  value={forumBody}
+                  onChange={(event) => setForumBody(event.target.value)}
+                  className="input"
+                  rows={4}
+                  placeholder="Write a longer note for the convoy..."
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={forumSaving || !forumTitle.trim() || !forumBody.trim()}
+                  onClick={submitForumPost}
+                >
+                  {forumSaving
+                    ? 'Saving...'
+                    : editingForumPostId
+                      ? 'Save Changes'
+                      : 'Publish Discussion'}
+                </button>
+                {editingForumPostId && (
+                  <button type="button" className="btn-secondary" onClick={cancelForumEdit} disabled={forumSaving}>
+                    Cancel Edit
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 space-y-3">
+              {forumPosts.length === 0 && !forumLoading ? (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-600">
+                  No forum discussions yet. Start with route rules, stop planning, or known road issues.
+                </div>
+              ) : (
+                forumPosts.slice(0, 50).map((post) => {
+                  const authorLabel = post.author?.name || post.author?.phone || nameByUserId.get(post.authorId) || post.authorId.slice(0, 8);
+                  const canManagePost = isLeader || post.authorId === myUserId;
+                  return (
+                    <div key={post.id} className={`rounded-xl border p-4 ${
+                      post.pinned ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'
+                    }`}>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {post.pinned && (
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                                Pinned
+                              </span>
+                            )}
+                            <h4 className="font-semibold text-slate-900">{post.title}</h4>
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {authorLabel} • updated {new Date(post.updatedAt).toLocaleString()}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {isLeader && (
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              onClick={async () => {
+                                if (!id) return;
+                                setForumError(null);
+                                try {
+                                  await updateForumPost(id, post.id, { pinned: !post.pinned });
+                                  refreshForumPosts();
+                                } catch (e) {
+                                  setForumError(e instanceof Error ? e.message : 'Failed to update pin');
+                                }
+                              }}
+                            >
+                              {post.pinned ? 'Unpin' : 'Pin'}
+                            </button>
+                          )}
+                          {canManagePost && (
+                            <button type="button" className="btn-secondary" onClick={() => startForumEdit(post)}>
+                              Edit
+                            </button>
+                          )}
+                          {canManagePost && (
+                            <button
+                              type="button"
+                              className="btn-danger"
+                              onClick={async () => {
+                                if (!id) return;
+                                if (!window.confirm('Delete this forum post?')) return;
+                                setForumError(null);
+                                try {
+                                  await deleteForumPost(id, post.id);
+                                  if (editingForumPostId === post.id) cancelForumEdit();
+                                  refreshForumPosts();
+                                } catch (e) {
+                                  setForumError(e instanceof Error ? e.message : 'Failed to delete forum post');
+                                }
+                              }}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-3 whitespace-pre-wrap break-words text-sm text-slate-700">
+                        {post.body}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
 
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="card">

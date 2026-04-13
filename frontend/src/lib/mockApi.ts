@@ -5,6 +5,7 @@ import type {
   ConvoyEvent,
   ConvoyPublicPreview,
   ConvoyWithInvite,
+  ForumPost,
   GeocodeSearchResult,
   LocationPoint,
   NearbyOpenConvoy,
@@ -255,5 +256,36 @@ export async function listConvoyEvents(convoyId: string) {
 export async function createRandomConvoyEvent(convoyId: string) {
   return request<ConvoyEvent>(`/convoys/${convoyId}/events/random`, {
     method: 'POST'
+  });
+}
+
+export async function listForumPosts(convoyId: string, query?: { limit?: number }) {
+  const qs = new URLSearchParams();
+  if (typeof query?.limit === 'number') qs.set('limit', String(query.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return request<ForumPost[]>(`/convoys/${convoyId}/forum-posts${suffix}`);
+}
+
+export async function createForumPost(convoyId: string, input: { title: string; body: string }) {
+  return request<ForumPost>(`/convoys/${convoyId}/forum-posts`, {
+    method: 'POST',
+    body: input
+  });
+}
+
+export async function updateForumPost(
+  convoyId: string,
+  postId: string,
+  input: { title?: string; body?: string; pinned?: boolean }
+) {
+  return request<ForumPost>(`/convoys/${convoyId}/forum-posts/${postId}`, {
+    method: 'PATCH',
+    body: input
+  });
+}
+
+export async function deleteForumPost(convoyId: string, postId: string) {
+  return request<{ ok: boolean }>(`/convoys/${convoyId}/forum-posts/${postId}`, {
+    method: 'DELETE'
   });
 }
